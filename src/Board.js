@@ -4,6 +4,8 @@ import "dragula/dist/dragula.css";
 import Swimlane from "./Swimlane";
 import "./Board.css";
 
+const statusList = ["backlog", "in-progress", "complete"];
+
 const stateMapper = {
   Backlog: "backlog",
   "In Progress": "inProgress",
@@ -16,23 +18,34 @@ const statusMapper = {
   Complete: "complete",
 };
 
+const statusReverseMapperForApi = {
+  backlog: "backlog",
+  "in-progress": "inProgress",
+  complete: "complete",
+};
+
+const sortArrayByPriority = (currentArr) => {
+  return [...currentArr].sort(
+    ({ priority: priority1 }, { priority: priority2 }) => priority1 - priority2
+  );
+};
+
 // Koundinya Pidaparthy Changes
 
 export default class Board extends React.Component {
   constructor(props) {
     super(props);
-    const clients = this.getClients();
     this.state = {
       clients: {
-        backlog: clients.filter(
-          (client) => !client.status || client.status === "backlog"
-        ),
-        inProgress: clients.filter(
-          (client) => client.status && client.status === "in-progress"
-        ),
-        complete: clients.filter(
-          (client) => client.status && client.status === "complete"
-        ),
+        backlog: [],
+        inProgress: [],
+        complete: [],
+      },
+      limitQuery: {
+        currentStatus: "",
+        destinationStatus: "",
+        elementId: "",
+        siblingId: "",
       },
     };
     this.swimlanes = {
@@ -41,109 +54,66 @@ export default class Board extends React.Component {
       complete: React.createRef(),
     };
   }
-  getClients() {
-    return [
-      [
-        "1",
-        "Stark, White and Abbott",
-        "Cloned Optimal Architecture",
-        "in-progress",
-      ],
-      [
-        "2",
-        "Wiza LLC",
-        "Exclusive Bandwidth-Monitored Implementation",
-        "complete",
-      ],
-      [
-        "3",
-        "Nolan LLC",
-        "Vision-Oriented 4Thgeneration Graphicaluserinterface",
-        "backlog",
-      ],
-      [
-        "4",
-        "Thompson PLC",
-        "Streamlined Regional Knowledgeuser",
-        "in-progress",
-      ],
-      [
-        "5",
-        "Walker-Williamson",
-        "Team-Oriented 6Thgeneration Matrix",
-        "in-progress",
-      ],
-      ["6", "Boehm and Sons", "Automated Systematic Paradigm", "backlog"],
-      [
-        "7",
-        "Runolfsson, Hegmann and Block",
-        "Integrated Transitional Strategy",
-        "backlog",
-      ],
-      ["8", "Schumm-Labadie", "Operative Heuristic Challenge", "backlog"],
-      [
-        "9",
-        "Kohler Group",
-        "Re-Contextualized Multi-Tasking Attitude",
-        "backlog",
-      ],
-      ["10", "Romaguera Inc", "Managed Foreground Toolset", "backlog"],
-      ["11", "Reilly-King", "Future-Proofed Interactive Toolset", "complete"],
-      [
-        "12",
-        "Emard, Champlin and Runolfsdottir",
-        "Devolved Needs-Based Capability",
-        "backlog",
-      ],
-      [
-        "13",
-        "Fritsch, Cronin and Wolff",
-        "Open-Source 3Rdgeneration Website",
-        "complete",
-      ],
-      [
-        "14",
-        "Borer LLC",
-        "Profit-Focused Incremental Orchestration",
-        "backlog",
-      ],
-      [
-        "15",
-        "Emmerich-Ankunding",
-        "User-Centric Stable Extranet",
-        "in-progress",
-      ],
-      [
-        "16",
-        "Willms-Abbott",
-        "Progressive Bandwidth-Monitored Access",
-        "in-progress",
-      ],
-      ["17", "Brekke PLC", "Intuitive User-Facing Customerloyalty", "complete"],
-      [
-        "18",
-        "Bins, Toy and Klocko",
-        "Integrated Assymetric Software",
-        "backlog",
-      ],
-      [
-        "19",
-        "Hodkiewicz-Hayes",
-        "Programmable Systematic Securedline",
-        "backlog",
-      ],
-      ["20", "Murphy, Lang and Ferry", "Organized Explicit Access", "backlog"],
-    ].map((companyDetails) => ({
-      id: companyDetails[0],
-      name: companyDetails[1],
-      description: companyDetails[2],
-      status: companyDetails[3],
-    }));
+  async getClients() {
+    const clients = await Promise.all(
+      statusList.map(async (curr) => {
+        const currentStatusValue = await fetch(
+          `http://localhost:3001/api/v1/clients?status=${curr}`
+        )
+          .then((data) => data.json())
+          .then((unsortedData) => {
+            return sortArrayByPriority(unsortedData);
+          });
+        return {
+          [statusReverseMapperForApi[curr]]: currentStatusValue,
+        };
+      })
+    );
+    const reducedClients = clients.reduce((acc, curr) => {
+      return {
+        ...acc,
+        ...curr,
+      };
+    }, {});
+    this.setState({ clients: reducedClients });
   }
+
+  async updateClients({
+    currentStatus,
+    destinationStatus,
+    elementId,
+    siblingId,
+  }) {
+    const clients = await fetch(
+      `http://localhost:3001/api/v1/clients/${elementId}`,
+      {
+        method: "PUT",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          currentStatus,
+          destinationStatus,
+          siblingId,
+        }),
+      }
+    ).then((data) => data.json());
+    this.setState({
+      clients: {
+        backlog: clients.filter(({ status }) => status === "backlog"),
+        inProgress: clients.filter(({ status }) => status === "in-progress"),
+        complete: clients.filter(({ status }) => status === "complete"),
+      },
+    });
+  }
+
   renderSwimlane(name, clients, ref) {
     return <Swimlane name={name} clients={clients} dragulaRef={ref} />;
   }
   componentDidMount() {
+    // On Initial Render
+    this.getClients();
     if (
       this.swimlanes.backlog.current &&
       this.swimlanes.inProgress.current &&
@@ -157,36 +127,42 @@ export default class Board extends React.Component {
         ],
         {
           direction: "horizontal",
-          moves: (_el, _container, handle, sibling) => {
+          moves: (_el, _container) => {
             return true;
           },
-          accepts: (currElement, destinationContainer, currentContainer) => {
-            const currentId = currentContainer.getAttribute("id");
-            const destinationId = destinationContainer.getAttribute("id");
+          accepts: (
+            currElement,
+            destinationContainer,
+            currentContainer,
+            siblingElement
+          ) => {
+            const currentStatus = currentContainer.getAttribute("id");
+            const destinationStatus = destinationContainer.getAttribute("id");
             const elementId = currElement.getAttribute("data-id");
-            const currentState = { ...this.state.clients };
-            const currentElementObj =
-              (currentState[stateMapper[currentId]] || []).find(
-                ({ id }) => id === elementId
-              ) || {};
-
-            if (currentId !== destinationId && currentElementObj.name) {
-              currentState[stateMapper[destinationId]] = currentState[
-                stateMapper[destinationId]
-              ].concat([
-                {
-                  ...currentElementObj,
-                  status: statusMapper[destinationId],
-                },
-              ]);
-              currentState[stateMapper[currentId]] = currentState[
-                stateMapper[currentId]
-              ].filter(({ id }) => id !== elementId);
+            let siblingId = "";
+            if (siblingElement) {
+              siblingId = siblingElement.getAttribute("data-id");
+            }
+            if (
+              this.state.limitQuery.currentStatus !== currentStatus ||
+              this.state.limitQuery.destinationStatus !== destinationStatus ||
+              this.state.limitQuery.elementId !== elementId ||
+              this.state.limitQuery.siblingId !== siblingId
+            ) {
               this.setState({
-                clients: currentState,
+                limitQuery: {
+                  currentStatus,
+                  destinationStatus,
+                  elementId,
+                  siblingId,
+                },
               });
-            } else if (currentId === destinationId) {
-              return true;
+              this.updateClients({
+                currentStatus: statusMapper[currentStatus],
+                destinationStatus: statusMapper[destinationStatus],
+                elementId: elementId,
+                siblingId: siblingId,
+              });
             }
             return false;
           },
@@ -198,6 +174,7 @@ export default class Board extends React.Component {
           revertOnSpill: false,
           removeOnSpill: false,
           mirrorContainer: document.body,
+          delay: 10,
           ignoreInputTextSelection: true,
           slideFactorX: 0,
           slideFactorY: 0,
